@@ -11,10 +11,10 @@ def _per_token_group_quant_fp8_3d(
     y_s_ptr,               # *FP32  scales (E, T, G)
 
     # Sizes ---------------------------------------------------------------
-    E: tl.constexpr,       # num_experts              – dim0 (slowest)
-    T: tl.constexpr,       # max_num_tokens           – dim1 (middle)
-    H: tl.constexpr,       # hidden dimension         – dim2 (fastest)
-    GROUP_SIZE: tl.constexpr,  # elements per group (e.g., 128)
+    E: tl.constexpr,       # num_experts
+    T: tl.constexpr,       # max_num_tokens
+    H: tl.constexpr,       # hidden dimension
+    GROUP_SIZE: tl.constexpr,  # elements per group (usually 128)
 
     # Strides for y (elements) -------------------------------------------
     stride_y_e,
@@ -47,8 +47,7 @@ def _per_token_group_quant_fp8_3d(
         `G = H // GROUP_SIZE` and with *element* strides
         `(T*G, 1, T)` so that the *token* dimension is the fastest‑varying in
         memory – matching the downstream reshape you showed.
-    *   *All* strides are expressed **in elements**, not bytes. Triton pointer
-        arithmetic is element‑based, so this avoids extra multiplications.
+    *   *All* strides are expressed **in elements**, not bytes.
     """
 
     G = H // GROUP_SIZE  # groups per hidden dim
@@ -136,18 +135,9 @@ def quant_fp8_3d(
 
     grid = (E * G * T,)
 
-    # guard against older PyTorch builds missing finfo for FP8
-    try:
-        f_info = torch.finfo(fp8_dtype)
-        fp8_max = f_info.max
-        fp8_min = -f_info.max
-    except (TypeError, ValueError):
-        # fall back to constants
-        if fp8_dtype == getattr(torch, "float8_e4m3fn", None):
-            fp8_max = 448.0
-        else:
-            fp8_max = 57344.0  # e5m2
-        fp8_min = -fp8_max
+    f_info = torch.finfo(fp8_dtype)
+    fp8_max = f_info.max
+    fp8_min = -f_info.max
 
     _per_token_group_quant_fp8_3d[grid](
         y, y_q, y_s_raw,
@@ -177,6 +167,10 @@ def _self_test():
         print("float8_e4m3fn not available; skipping test")
         return
 
+    if not torch.cuda.is_available():
+        print("CUDA not available; skipping test")
+        return
+
     E, T, H = 2, 3, 256
     y = torch.randn(E, T, H, device="cuda", dtype=torch.float32)
     y_q, y_s = quant_fp8_3d(y, dtype_fp8, group_size=128)
@@ -189,7 +183,9 @@ def _self_test():
     assert y_s.stride() == expected_strides, "y_s strides mismatch"
 
     # quick reconstruction error check (should be small)
-    y_s_expanded = y_s.unsqueeze(-1).expand_as(y_q).to(torch.float32)
+    G = y_s.shape[-1]
+    group_size = H // G
+    y_s_expanded = y_s.unsqueeze(-1).expand(-1, -1, -1, group_size).reshape(E, T, H).to(torch.float32)
     y_deq = y_q.to(torch.float32) * y_s_expanded
     mae = (y - y_deq).abs().mean().item()
     print("MAE after round‑trip:", mae)
