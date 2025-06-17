@@ -58,52 +58,39 @@ def _per_token_group_quant_fp8_3d(
 
     G = H // GROUP_SIZE  # groups per hidden dim
 
-    # ----------------------- map program id -> (e, t, g) ----------------
+    # ----------------------- map program id -> (e, g) --------------------
     pid = tl.program_id(0)
-    t = pid % T
-    tmp = pid // T
-    g = tmp % G
-    e = tmp // G
+    e = pid // G
+    g = pid % G
 
-    # load number of valid tokens for this expert and check validity
+    # number of valid tokens for this expert
     n_tokens = tl.load(counts_ptr + e * stride_counts_e).to(tl.int32)
-    valid = t < n_tokens
 
-    # ----------------------- base offsets ------------------------------
-    base_y_offset = (
-        e * stride_y_e +
-        t * stride_y_t +
-        g * GROUP_SIZE * stride_y_h
-    )
-    base_yq_offset = (
-        e * stride_yq_e +
-        t * stride_yq_t +
-        g * GROUP_SIZE * stride_yq_h
-    )
-    base_ys_offset = (
-        e * stride_ys_e +
-        t * stride_ys_t +
-        g * stride_ys_g
-    )
-
-    # ----------------------- load FP32 activations ----------------------
+    # block for H dimension
     cols = tl.arange(0, BLOCK)
-    mask_h = cols < GROUP_SIZE
-    mask = mask_h & valid
-    y = tl.load(y_ptr + base_y_offset + cols * stride_y_h,
-                mask=mask, other=0.0).to(tl.float32)
+    mask_h = cols < BLOCK
 
-    # ----------------------- quantise -----------------------------------
-    _absmax = tl.maximum(tl.max(tl.abs(y)), eps)
-    y_s = _absmax / fp8_max                     # scale for this (e,t,g)
+    # iterate over tokens for this (expert, group)
+    t = tl.zeros([], tl.int32)
+    while t < n_tokens:
+        base_y_offset = e * stride_y_e + t * stride_y_t + g * GROUP_SIZE * stride_y_h
+        base_yq_offset = e * stride_yq_e + t * stride_yq_t + g * GROUP_SIZE * stride_yq_h
+        base_ys_offset = e * stride_ys_e + t * stride_ys_t + g * stride_ys_g
 
-    y_q = tl.clamp(y / y_s, fp8_min, fp8_max).to(y_q_ptr.dtype.element_ty)
+        mask = mask_h
+        y = tl.load(y_ptr + base_y_offset + cols * stride_y_h,
+                    mask=mask, other=0.0).to(tl.float32)
 
-    # ----------------------- store outputs ------------------------------
-    tl.store(y_q_ptr + base_yq_offset + cols * stride_yq_h,
-             y_q, mask=mask)
+        _absmax = tl.maximum(tl.max(tl.abs(y)), eps)
+        y_s = _absmax / fp8_max
 
-    tl.store(y_s_ptr + base_ys_offset, y_s, mask=valid)
+        y_q = tl.clamp(y / y_s, fp8_min, fp8_max).to(y_q_ptr.dtype.element_ty)
+
+        tl.store(y_q_ptr + base_yq_offset + cols * stride_yq_h,
+                 y_q, mask=mask)
+        tl.store(y_s_ptr + base_ys_offset, y_s)
+
+        t += 1
 
 
 # -------------------------------------------------------------------------
@@ -154,7 +141,8 @@ def quant_fp8_3d(
     # stride for tokens_per_expert (elements)
     stride_cnt_e = tokens_per_expert.stride()[0]
 
-    grid = (E * G * T,)
+    # static grid over experts and H-groups; tokens loop is internal to the kernel
+    grid = (E * G,)
 
     f_info = torch.finfo(fp8_dtype)
     fp8_max = f_info.max

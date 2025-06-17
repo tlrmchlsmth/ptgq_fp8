@@ -35,14 +35,28 @@ def benchmark(
     # simulate token counts per expert (constant average load)
     tokens_per_expert = torch.full((E,), avg_tokens_per_expert, dtype=torch.int32, device=device)
 
-    # warmup
-    quant_fp8_3d(y, dtype_fp8, tokens_per_expert, group_size)
+    # warmup and pre-allocation for CUDA graph
+    for _ in range(2):
+        quant_fp8_3d(y, dtype_fp8, tokens_per_expert, group_size)
     torch.cuda.synchronize()
 
-    # timing loop
+    # static inputs for CUDA graph capture
+    static_y = y.clone()
+    static_tokens = tokens_per_expert.clone()
+    # pre-allocate output memory via a dry run
+    quant_fp8_3d(static_y, dtype_fp8, static_tokens, group_size)
+    torch.cuda.synchronize()
+
+    # capture CUDA graph
+    g = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(g):
+        quant_fp8_3d(static_y, dtype_fp8, static_tokens, group_size)
+    torch.cuda.synchronize()
+
+    # timing loop using CUDA graph replay
     start = time.time()
     for _ in range(repeat):
-        quant_fp8_3d(y, dtype_fp8, tokens_per_expert, group_size)
+        g.replay()
     torch.cuda.synchronize()
     end = time.time()
 
@@ -55,7 +69,7 @@ if __name__ == '__main__':
     # realistic MoE GPU benchmark parameters
     benchmark(
         E=8,
-        T=128,
+        T=10240,
         H=2560,
         avg_tokens_per_expert=16,
         group_size=128,
