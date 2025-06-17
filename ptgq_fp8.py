@@ -123,10 +123,10 @@ def quant_fp8_3d(
     tokens_per_expert = tokens_per_expert.to(device=y.device, dtype=torch.int32)
 
     # ---------------- allocate outputs ----------------------------------
-    y_q = torch.zeros_like(y, dtype=fp8_dtype)
+    y_q = torch.empty_like(y, dtype=fp8_dtype)
 
     # allocate raw buffer; we'll treat it with custom strides inside the kernel
-    y_s_raw = torch.zeros((E, T, G), dtype=torch.float32, device=y.device)
+    y_s_raw = torch.empty((E, T, G), dtype=torch.float32, device=y.device)
 
     # ---------------- stride bookkeeping (elements, not bytes) ----------
     stride_y_e, stride_y_t, stride_y_h = y.stride()
