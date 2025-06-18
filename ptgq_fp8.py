@@ -125,8 +125,6 @@ def quant_fp8_3d(
     # ---------------- allocate outputs ----------------------------------
     y_q = torch.empty_like(y, dtype=fp8_dtype)
 
-    # allocate raw buffer; we'll treat it with custom strides inside the kernel
-    y_s_raw = torch.empty((E, T, G), dtype=torch.float32, device=y.device)
 
     # ---------------- stride bookkeeping (elements, not bytes) ----------
     stride_y_e, stride_y_t, stride_y_h = y.stride()
@@ -137,6 +135,10 @@ def quant_fp8_3d(
     stride_ys_e = T * G
     stride_ys_t = 1
     stride_ys_g = T
+
+    # allocate scale buffer with proper shape and stride
+    y_s = torch.empty_strided((E, T, G), (stride_ys_e, stride_ys_t, stride_ys_g),
+                              dtype=torch.float32, device=y.device)
 
     # stride for tokens_per_expert (elements)
     stride_cnt_e = tokens_per_expert.stride()[0]
@@ -149,7 +151,7 @@ def quant_fp8_3d(
     fp8_min = -f_info.max
 
     _per_token_group_quant_fp8_3d[grid](
-        y, y_q, y_s_raw, tokens_per_expert,
+        y, y_q, y_s, tokens_per_expert,
         E, T, H, group_size,
         stride_y_e, stride_y_t, stride_y_h,
         stride_yq_e, stride_yq_t, stride_yq_h,
@@ -160,11 +162,6 @@ def quant_fp8_3d(
         num_warps=4,
     )
 
-    # expose scales with the *requested* strides (T contiguous)
-    y_s = y_s_raw.as_strided(
-        size=(E, T, G),
-        stride=(stride_ys_e, stride_ys_t, stride_ys_g)
-    )
     return y_q, y_s
 
 
