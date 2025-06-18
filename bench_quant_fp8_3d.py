@@ -80,10 +80,10 @@ def benchmark(
 if __name__ == '__main__':
     # realistic MoE GPU benchmark parameters
     benchmark(
-        E=32,
+        E=128,
         T=512,
         H=2560,
-        avg_tokens_per_expert=16,
+        avg_tokens_per_expert=32,
         group_size=128,
         repeat=200,
     )
