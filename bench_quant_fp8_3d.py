@@ -1,5 +1,6 @@
 """
 Benchmark for quant_fp8_3d with realistic MoE token loads.
+Compares performance with and without CUDA Graphs.
 
 Focus on E=8 experts, max_tokens_per_expert=128, hidden H=2560, and average 16 tokens per expert.
 """
@@ -40,6 +41,14 @@ def benchmark(
         quant_fp8_3d(y, dtype_fp8, tokens_per_expert, group_size)
     torch.cuda.synchronize()
 
+    # timing loop without CUDA graph replay
+    start = time.time()
+    for _ in range(repeat):
+        quant_fp8_3d(y, dtype_fp8, tokens_per_expert, group_size)
+    torch.cuda.synchronize()
+    end = time.time()
+    avg_ms_no_graph = (end - start) * 1000.0 / repeat
+
     # static inputs for CUDA graph capture
     static_y = y.clone()
     static_tokens = tokens_per_expert.clone()
@@ -60,16 +69,19 @@ def benchmark(
     torch.cuda.synchronize()
     end = time.time()
 
-    avg_ms = (end - start) * 1000.0 / repeat
-    print(f"quant_fp8_3d: E={E}, T={T}, H={H}, avg_tokens_per_expert={avg_tokens_per_expert},"
-          f" group_size={group_size} -> {avg_ms:.3f} ms per call")
+    avg_ms_graph = (end - start) * 1000.0 / repeat
+    print(f"quant_fp8_3d (no graph): E={E}, T={T}, H={H}, avg_tokens_per_expert={avg_tokens_per_expert},"
+          f" group_size={group_size} -> {avg_ms_no_graph:.3f} ms per call")
+    print(f"quant_fp8_3d (CUDA graph): E={E}, T={T}, H={H}, avg_tokens_per_expert={avg_tokens_per_expert},"
+          f" group_size={group_size} -> {avg_ms_graph:.3f} ms per call")
+    print(f"Speedup (no graph / CUDA graph): {avg_ms_no_graph/avg_ms_graph:.2f}x")
 
 
 if __name__ == '__main__':
     # realistic MoE GPU benchmark parameters
     benchmark(
-        E=8,
-        T=10240,
+        E=32,
+        T=512,
         H=2560,
         avg_tokens_per_expert=16,
         group_size=128,

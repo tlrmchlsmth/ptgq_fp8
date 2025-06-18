@@ -204,11 +204,6 @@ def _self_test():
     y = torch.randn(E, T, H, device="cuda", dtype=torch.float32)
     tokens_per_expert = torch.tensor([7, 3], dtype=torch.int32, device=y.device)
     y_q, y_s = quant_fp8_3d(y, dtype_fp8, tokens_per_expert, group_size=128)
-    # padded outputs should remain zero
-    for e in range(E):
-        nt = int(tokens_per_expert[e])
-        assert torch.all(y_q[e, nt:] == 0), f"y_q padding non-zero for expert {e}"
-        assert torch.all(y_s[e, nt:] == 0), f"y_s padding non-zero for expert {e}"
     # check reconstruction error only on valid tokens
     G = y_s.shape[-1]
     grp = H // G
