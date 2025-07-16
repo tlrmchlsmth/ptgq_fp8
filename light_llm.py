@@ -2,7 +2,6 @@ import torch
 
 import triton
 import triton.language as tl
-from .moe_silu_and_mul_config import MoeSiluAndMulKernelConfig
 
 
 # Taken from https://github.com/ModelTC/LightLLM/blob/8ed97c74c18f11505b048b1ba00ba5c0cef8bff6/lightllm/common/fused_moe/moe_silu_and_mul_mix_quant_ep.py#L69

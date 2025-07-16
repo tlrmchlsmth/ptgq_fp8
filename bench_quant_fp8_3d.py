@@ -135,7 +135,7 @@ def benchmark_silu_mul(
 
 
 if __name__ == '__main__':
-    E=64
+    E=256
     T=8192
     H=2560
     avg_tokens_per_expert=16
