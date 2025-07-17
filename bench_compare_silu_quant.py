@@ -78,7 +78,7 @@ def benchmark(
         print(
             f"tokens={tokens}: "
             f"\tquant_silu_mul {t_graph:.3f}ms "
-            f"\tlight_llm no_graph {t2_graph:.3f}ms"
+            f"\tlight_llm {t2_graph:.3f}ms"
         )
 
 
