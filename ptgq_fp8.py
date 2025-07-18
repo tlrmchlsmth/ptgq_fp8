@@ -135,6 +135,7 @@ def _per_token_group_silu_mul_quant_fp8_3d(
 
     # Meta ---------------------------------------------------------------
     BLOCK: tl.constexpr,
+    NUM_STAGES:tl.constexpr,
 ):
     """Dynamic FP8 quantisation of silu(input[..., :H]) * input[..., H:] over a 3D tensor laid out **(E, T, 2*H)**.
 
@@ -160,8 +161,7 @@ def _per_token_group_silu_mul_quant_fp8_3d(
     cols = cols.to(tl.int64)
     mask_h = cols < BLOCK
 
-    t = tl.zeros([], tl.int64)
-    while t < n_tokens:
+    for t in tl.range(0, n_tokens, num_stages=NUM_STAGES):
         base_i_offset = e * stride_i_e + t * stride_i_t + g * GROUP_SIZE * stride_i_h
         base_yq_offset = e * stride_yq_e + t * stride_yq_t + g * GROUP_SIZE * stride_yq_h
         base_ys_offset = e * stride_ys_e + t * stride_ys_t + g * stride_ys_g
@@ -179,8 +179,6 @@ def _per_token_group_silu_mul_quant_fp8_3d(
 
         tl.store(y_q_ptr + base_yq_offset + cols * stride_yq_h, y_q, mask=mask)
         tl.store(y_s_ptr + base_ys_offset, y_s)
-
-        t += 1
 
 # -------------------------------------------------------------------------
 # Python wrapper -----------------------------------------------------------
@@ -311,7 +309,8 @@ def quant_silu_mul_fp8_3d(
         stride_cnt_e,
         eps, fp8_min, fp8_max,
         BLOCK=group_size,
-        num_warps=4,
+        NUM_STAGES=8,
+        num_warps=1,
     )
 
     return y_q, y_s
