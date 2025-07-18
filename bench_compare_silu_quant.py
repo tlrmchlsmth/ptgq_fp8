@@ -84,7 +84,7 @@ def benchmark(
 
 if __name__ == '__main__':
     # example configuration
-    E, T, H = 256, 1024, 7168
+    E, T, H = 256, 2048, 7168
     group_size = 128
-    token_sweep = [4, 8, 16, 32, 64, 128, 256]
+    token_sweep = [4, 8, 16, 32, 64, 128, 256, 384, 512, 1024, 2048]
     benchmark(E, T, H, group_size, token_sweep, repeat=200)
